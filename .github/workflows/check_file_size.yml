@@ -17,6 +17,7 @@ jobs:
 
       - name: Check file sizes
         id: check_files
+        continue-on-error: true
         run: |
           set -euo pipefail
 
@@ -29,17 +30,18 @@ jobs:
           failed=0
           files_over=()
 
-          git diff --name-only -z --diff-filter=AMCR "$BASE_SHA" "$HEAD_SHA" \
-          | while IFS= read -r -d '' file; do
-              if [ -f "$file" ]; then
+          while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then
                 size=$(wc -c < "$file")
                 if [ "$size" -gt "$MAX_SIZE" ]; then
                   echo "Error: $file ($size bytes)"
                   files_over+=("- $file ($size bytes)")
                   failed=1
                 fi
-              fi
-            done
+            fi
+          done < <(
+            git diff --name-only -z --diff-filter=AMCR "$BASE_SHA" "$HEAD_SHA"
+          )
 
           if [ "$failed" -eq 1 ]; then
             {
@@ -60,12 +62,12 @@ jobs:
             const fileList = `${{ steps.check_files.outputs.file_list }}`;
             if (fileList) {
               const body = `
-              我们注意到以下文件的大小超过了 1MB，请在压缩后再次提交 Pull Request 请求：
+            我们注意到以下文件的大小超过了 1MB，请在压缩后再次提交 Pull Request：
 
-              We have noted that the following files exceed 1MB in size. Please resubmit your pull request after compressing them:
+            We have noted that the following files exceed 1MB in size. Please resubmit your pull request after compressing them:
 
-              ${fileList}
-              `;
+            ${fileList}
+            `.trim();
               
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
@@ -81,6 +83,7 @@ jobs:
                 labels: ['Changes requested']
               });
             }
+              throw new Error('File size check failed');
 
       - name: Remove label if size check passed
         if: success()
